@@ -14,7 +14,7 @@ binding = "R2"
 bucket_name = "twikoo"
 
 [vars]
-R2_PUBLIC_URL = "https://twikoo.r2.mingy.org"
+R2_PUBLIC_URL = "https://twikoo.lyrnox.com"
 
 [dev]
 port = 5000
