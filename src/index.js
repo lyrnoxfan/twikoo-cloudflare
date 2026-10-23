@@ -344,6 +344,15 @@ export default {
    * @returns {Response}
    */
   async fetch (request, env) {
+    // 只接受博客同源代理（AstroPages functions/api/twikoo.js）转发来的请求：
+    // 必须带正确的 X-Twikoo-Proxy-Secret。未配置 TWIKOO_PROXY_SECRET 时一律拒绝（fail closed）。
+    if (!(await isTrustedProxy(request, env))) {
+      return new Response(JSON.stringify({ code: 403, message: 'Forbidden' }), {
+        status: 403,
+        headers: { 'content-type': 'application/json;charset=UTF-8', 'cache-control': 'no-store' }
+      })
+    }
+    trustedRequests.add(request)
     setDb(env.DB)
     let event
     try {
@@ -1076,7 +1085,30 @@ function isAdmin () {
   return config.ADMIN_PASS === md5(uid)
 }
 
+// 已通过代理密钥校验的请求：只有这些请求才采信代理转发的访客 IP
+const trustedRequests = new WeakSet()
+
+async function isTrustedProxy (request, env) {
+  const expected = env.TWIKOO_PROXY_SECRET
+  const given = request.headers.get('X-Twikoo-Proxy-Secret')
+  if (!expected || !given) return false
+  const enc = new TextEncoder()
+  const [a, b] = await Promise.all([
+    crypto.subtle.digest('SHA-256', enc.encode(expected)),
+    crypto.subtle.digest('SHA-256', enc.encode(given))
+  ])
+  const x = new Uint8Array(a)
+  const y = new Uint8Array(b)
+  let diff = 0
+  for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i]
+  return diff === 0
+}
+
 function getIp (request) {
+  if (trustedRequests.has(request)) {
+    const forwarded = (request.headers.get('X-Twikoo-Client-IP') || '').trim()
+    if (forwarded && forwarded.length <= 64 && /^[0-9A-Fa-f:.]+$/.test(forwarded)) return forwarded
+  }
   return request.headers.get('CF-Connecting-IP')
 }
 
