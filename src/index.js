@@ -1,3 +1,4 @@
+import { commentOwner, recentComments } from './comment-access.js'
 /*!
  * Twikoo Cloudflare worker
  * (c) 2024-present Tao Xin & Mingy & iMaeGoo
@@ -303,17 +304,6 @@ WHERE url = ?1 AND NOT isSpam AND (?2 OR rid = "")
 `.trim()))
   }
 
-  get recentCommentsByUrlQuery () {
-    return this._recentCommentsByUrlQuery ?? (this._recentCommentsByUrlQuery = this.DB.prepare(`
-SELECT * FROM comment
-WHERE
-  (?1 OR url = ?2) AND
-  NOT isSpam AND
-  (?3 OR rid = "") AND
-LIMIT ?4
-`.trim()))
-  }
-
   get readConfigQuery () {
     return this._readConfigQuery ?? (this._readConfigQuery =
       this.DB.prepare('SELECT value FROM config LIMIT 1')
@@ -392,8 +382,11 @@ export default {
         case 'COMMENT_IMPORT_FOR_ADMIN':
           res = await commentImportForAdmin(event)
           break
+        case 'COMMENT_GET_OWNER':
+          res = { code: 0, url: await commentOwner(env.DB, event.id) }
+          break
         case 'COMMENT_LIKE':
-          res = await commentLike(event)
+          res = await commentLike(event, request)
           break
         case 'COMMENT_SUBMIT':
           res = await commentSubmit(event, request)
@@ -757,17 +750,18 @@ async function readFile (file, type, log) {
 }
 
 // 点赞 / 取消点赞
-async function commentLike (event) {
+async function commentLike (event, request) {
   const res = {}
   validate(event, ['id'])
-  await like(event.id, getUid())
+  await like(event.id, getUid(), request.headers.get('X-Twikoo-Guest-Article'))
   return res
 }
 
 // 点赞 / 取消点赞
-async function like (id, uid) {
+async function like (id, uid, guestArticle) {
   const comment = await db.commentByIdQuery.bind(id).first()
-  if (!comment) return
+  if (guestArticle && (!comment || comment.isSpam || comment.url !== guestArticle)) throw new Error('Forbidden')
+  if (!comment) throw new Error('Comment not found')
   let likes = JSON.parse(comment.like)
   if (likes.findIndex((item) => item === uid) === -1) {
     // 赞
@@ -776,7 +770,12 @@ async function like (id, uid) {
     // 取消赞
     likes = likes.filter((item) => item !== uid)
   }
-  await db.updateLikeStmt.bind(id, JSON.stringify(likes)).run()
+  if (guestArticle) {
+    const update = await db.DB.prepare('UPDATE comment SET like = ?2 WHERE _id = ?1 AND url = ?3 AND NOT isSpam').bind(id, JSON.stringify(likes), guestArticle).run()
+    if (update.meta.changes !== 1) throw new Error('Comment unavailable')
+  } else {
+    await db.updateLikeStmt.bind(id, JSON.stringify(likes)).run()
+  }
 }
 
 /**
@@ -995,19 +994,7 @@ async function getCommentsCount (event) {
 async function getRecentComments (event) {
   const res = {}
   try {
-    if (event.pageSize > 100) event.pageSize = 100
-    let result
-    if (event.urls && event.urls.length) {
-      result = await db.recentCommentsByUrlQuery.bind(
-        1, '', event.includeReply, event.pageSize || 10
-      ).all()
-    } else {
-      result = (await Promise.all(event.urls.map(
-        (url) => db.recentCommentsByUrlQuery.bind(
-          0, url, event.includeReply, event.pageSize || 10
-        ).all()
-      ))).flat()
-    }
+    const result = await recentComments(db.DB, event)
     res.data = result.map((comment) => {
       return {
         id: comment._id.toString(),
