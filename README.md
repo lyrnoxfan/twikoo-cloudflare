@@ -73,3 +73,16 @@ Because of the compatibility issues of `nodemailer` package, the email integrati
 ---
 
 If you encounter any issues, or have any questions for this deployment, you can send an email to tao@vanjs.org.
+
+## Proxy-only mode (lyrnox fork)
+
+The Worker only answers requests forwarded by the blog's same-origin proxy
+(`functions/api/twikoo.js` in AstroPages). Every request must carry
+`X-Twikoo-Proxy-Secret` equal to the Worker secret `TWIKOO_PROXY_SECRET`;
+anything else gets `403`. If the secret is not configured, all requests are
+rejected. The proxy forwards the visitor IP in `X-Twikoo-Client-IP`, which is
+only trusted on requests that passed the secret check.
+
+```shell
+npx wrangler secret put TWIKOO_PROXY_SECRET
+```
