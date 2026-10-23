@@ -86,3 +86,12 @@ only trusted on requests that passed the secret check.
 ```shell
 npx wrangler secret put TWIKOO_PROXY_SECRET
 ```
+
+
+## Pages 访客点赞的兼容更新
+
+受信任的同源代理可使用 `COMMENT_GET_OWNER` 读取非垃圾评论的实际文章路径。Pages 验证该文章存在于 guest 构建后，携带重建的 `X-Twikoo-Guest-Article` 内部请求头发起点赞；Worker 再按评论行核对归属，并以文章路径/非垃圾状态约束 UPDATE。浏览器请求仍需代理密钥，guest 不直接调用内部归属事件。先更新此 Worker，再更新配套 Pages；旧 Worker 不支持归属事件时新 Pages 会拒绝访客点赞而非放宽验证。主站点赞保持兼容。
+
+`GET_RECENT_COMMENTS` 的 `urls` 缺省或空数组表示全站最近评论，非空数组按 URL 筛选，默认不含回复和垃圾评论，按时间倒序最多 100 条。
+
+本地回归：Node 22.22+/24 上 `npm test`（真实 SQLite SQL）与 `npm run test:runtime`（临时本地 workerd/D1，合成评论）。不使用生产 D1/R2、不部署、不发送通知邮件。依赖弃用/CWE 提示仍是维护线索，不代表已确认可利用问题，也未因此全面升级依赖。
